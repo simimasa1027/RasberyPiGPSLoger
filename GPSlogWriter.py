@@ -1,5 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+==========================================================
+* Project       : GPSLoger
+* FileName      : GPSlogWriter.py
+* Description   : ログ取得クラス
+* CreateDay     : 2019/04/10
+*
+* History       :
+*   2018/04/10  新規作成
+*
+==========================================================
+"""
 
 import serial
 import threading
@@ -7,76 +19,140 @@ import time
 from datetime import datetime
 import math
 
+"""
+==========================================================
+* ClassName     : GPSログ取得クラス
+* Description   : GPSデータを取得し、GPXデータを出力
+==========================================================
+"""
 class GPSlogWriter():
+    m_gpsThread = None
     m_strSerialPath = '/dev/ttyAMA0'    # シリアルポートパス
     m_nBaudeRate = 9600                 # ボーレート
-    m_gpsSerial = ""           # GPSシリアル取得用
-    m_bIsStartFlag = False     # スレッド開始・終了フラグ
+    m_gpsSerial = ""                    # GPSシリアル取得用
+    m_bIsStartFlag = False              # スレッド開始・終了フラグ
     
-    # コンストラクタ
-    def __init__(self, strSerialPath = '/dev/ttyAMA0', nBaudeRate = 9600):
+    """
+    ==========================================================
+    * Function      : コンストラクタ
+    * args[in]      : strSerialPath シリアルポートパス
+    * args[in]      : nBaudeRate    ボーレート
+    * Description   : -
+    ==========================================================
+    """
+    def __init__(
+        self,
+        strSerialPath = '/dev/ttyAMA0',     # (i)シリアルポートパス
+        nBaudeRate = 9600                   # (i)ボーレート
+    ):
         self.m_strSerialPath = strSerialPath
         self.m_nBaudeRate = nBaudeRate
         self.m_gpsSerial = serial.Serial(self.m_strSerialPath, self.m_nBaudeRate, timeout=10)
-    
-    # gps取得開始関数
-    def start(self, upsTempClass, filePath = './', getStopTemp = 75):
+
+    """
+    ==========================================================
+    * Function      : GPS取得開始関数
+    * args[in]      : upsTempClass  電圧温度監視クラス変数
+    * args[in]      : folderPath    GPX出力フォルダパス
+    * args[in]      : getStopTemp   GPSデータ取得停止温度
+    * Description   : -
+    ==========================================================
+    """
+    def start(
+        self,
+        upsTempClass,       # (i)電圧温度監視クラス変数
+        folderPath = './',  # (i)GPX出力フォルダパス
+        getStopTemp = 75    # (i)GPSデータ取得停止温度
+    ):
         # gps取得をスレッドでやらせる
-        gpsThread = threading.Thread(target=self.getGPS,args=(upsTempClass,filePath,getStopTemp,))
-        gpsThread.start()
+        self.m_gpsThread = threading.Thread(target=self.getGPS,args=(upsTempClass,folderPath,getStopTemp,))
+        self.m_gpsThread.start()
         
-    # gps取得関数(スレッド)
-    def getGPS(self, upsTempClass, filePath,getStopTemp):
+    """
+    ==========================================================
+    * Function      : GPS取得関数
+    * args[in]      : upsTempClass  電圧温度監視クラス変数
+    * args[in]      : folderPath    GPX出力フォルダパス
+    * args[in]      : getStopTemp   GPSデータ取得停止温度
+    * Description   : -
+    ==========================================================
+    """
+    def getGPS(
+        self,
+        upsTempClass,   # (i)電圧温度監視クラス変数
+        folderPath,     # (i)GPX出力フォルダパス
+        getStopTemp     # (i)GPSデータ取得停止温度
+    ):
         self.m_gpsSerial.readline()	#1回目は捨てる
         aryNeedGPS = {}
         
         # 現在日時(YYYYMMDDhhmmss)を取得
         nowDate = datetime.now()
         
-        with open(filePath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='w') as writeGps:
+        with open(folderPath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='a') as writeGps:
         
             # GPXヘッダー文字列
             writeGps.write(self.gpxHeaderWrite(nowDate.strftime("%Y/%m/%d %H:%M:%S"),"だめ"))
             
-            self.m_bIsStartFlag = True
-            while(self.m_bIsStartFlag):
+        self.m_bIsStartFlag = True
+        while(self.m_bIsStartFlag):
+            # CPU温度がGPS取得温度上限を超えたら取得を中断する
+            if(float(upsTempClass.m_cpuTemp) >= float(getStopTemp)):
+                time.sleep(1)
+                continue
+            
+            strGetGPS = ""
+            try:
+                strGetGPS = self.m_gpsSerial.readline().decode('utf-8')
+            except UnicodeDecodeError as e:
+                print (e)
+                continue
                 
-                # CPU温度がGPS取得温度上限を超えたら取得を中断する
-                #print(upsTempClass.m_cpuTemp)
-                if(float(upsTempClass.m_cpuTemp) >= float(getStopTemp)):
-                    time.sleep(1)
-                    continue
-                
-                strGetGPS = ""
-                try:
-                    strGetGPS = self.m_gpsSerial.readline().decode('utf-8')
-                except UnicodeDecodeError as e:
-                    print (e)
-                    continue
-                    
-                if strGetGPS[0:6] == '$GPRMC': # GPRMC形式でなければ捨てる
-                    # GPSデータ配列の初期化
-                    aryNeedGPS = {}
-                    aryNeedGPS["GPRMC"] = strGetGPS
-                    continue
-                elif strGetGPS[0:6] == '$GPGGA':
-                    aryNeedGPS["GPGGA"] = strGetGPS
-                
-                # 必要なGPSデータを取得できたら
-                if len(aryNeedGPS) == 2:
+            if strGetGPS[0:6] == '$GPRMC': # GPRMC形式でなければ捨てる
+                # GPSデータ配列の初期化
+                aryNeedGPS = {}
+                aryNeedGPS["GPRMC"] = strGetGPS
+                continue
+            elif strGetGPS[0:6] == '$GPGGA':
+                aryNeedGPS["GPGGA"] = strGetGPS
+            
+            # 必要なGPSデータを取得できたら
+            if len(aryNeedGPS) == 2:
+                with open(folderPath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='a') as writeGps:    
                     writeGps.write(self.gpsMainWrite(aryNeedGPS))
-                    # GPSデータ配列の初期化
-                    aryNeedGPS = {}
-                    
+                # GPSデータ配列の初期化
+                aryNeedGPS = {}
+                
+        with open(folderPath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='a') as writeGps:                       
             writeGps.write(self.gpxFooterWrite())
 
-    # gps取得停止関数
-    def stop(self):
+    """
+    ==========================================================
+    * Function      : GPS取得停止関数
+    * Description   : -
+    ==========================================================
+    """
+    def stop(
+        self
+    ):
         # 子スレッドのループフラグをFalseにする
         self.m_bIsStartFlag = False
-    
-    # GPXヘッダー文字列作成
-    def gpxHeaderWrite(self,strName,strInfo):
+        self.m_gpsThread.join()
+
+    """
+    ==========================================================
+    * Function      : GPXヘッダー文字列作成
+    * args[in]      : strName   GPXデータのタイトル
+    * args[in]      : strInfo   GPXデータの説明
+    * Return        : GPXヘッダー文字列
+    * Description   : -
+    ==========================================================
+    """
+    def gpxHeaderWrite(
+        self,
+        strName,    # (i)GPXデータのタイトル
+        strInfo     # (i)GPXデータの説明
+    ):
         strGPXHeader = "";    #GPXのヘッダー文字列(返却用)
         
         strGPXHeader += \
@@ -95,9 +171,19 @@ class GPSlogWriter():
             "        <trkseg>\n"
         
         return strGPXHeader
-    
-    # GPXデータ文字列作成
-    def gpsMainWrite(self,aryGPS):
+
+    """
+    ==========================================================
+    * Function      : GPXデータ文字列作成
+    * args[in]      : aryGPS    GPRMC・GPGGA文字列の配列
+    * Return        : GPXデータ文字列
+    * Description   : -
+    ==========================================================
+    """
+    def gpsMainWrite(
+        self,
+        aryGPS      # (i)GPRMC・GPGGA文字列の配列
+    ):
         strGPXpoint = ""     #GPSのGPSデータ文字列
         
         aryGPRMC = aryGPS["GPRMC"].split(",")    # GPRMCの配列
@@ -151,9 +237,17 @@ class GPSlogWriter():
             "                </trkpt>\n"
 
         return strGPXpoint   
-    
-    # GPXフッター文字列作成
-    def gpxFooterWrite(self):
+
+    """
+    ==========================================================
+    * Function      : GPXフッター文字列作成
+    * Return        : GPXフッター文字列
+    * Description   : -
+    ==========================================================
+    """
+    def gpxFooterWrite(
+        self
+    ):
         strGPXFooter= "";    #GPXのヘッダー文字列(返却用)
         
         strGPXFooter += \

@@ -1,5 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+==========================================================
+* Project       : GPSLoger
+* FileName      : GPSlogerMain.py
+* Description   : GPSLogerメイン
+* CreateDay     : 2019/04/10
+*
+* History       :
+*   2018/04/10  新規作成
+*
+==========================================================
+"""
 
 import time
 import subprocess
@@ -15,6 +27,12 @@ CONFIG_FILE_PATH = './conf/gpsConfig.conf'
 # システム終了フラグ
 g_systemEndFlag = False
 
+"""
+==========================================================
+* Function      : メイン関数
+* Description   : 各スレッドの起動を行う
+==========================================================
+"""
 def main() :
     # 設定ファイルの読み込み
     gpsLoader= GPSsettingLoader.GPSsettingLoader()
@@ -43,13 +61,14 @@ def main() :
         if float(gpsLoader.m_mapGPSConfig["PowerOffTimeOutMin"]) <= \
             float((waitEndTimer - waitStartTimer) / 60):
             bLoop = False
-        #print(float(waitEndTimer - waitStartTimer) / 60)
+        
         time.sleep(0.1)
-    
+
     # 終了処理
     upsTempMonitor.stop()
     gpsWriter.stop()
-    
+
+    print("Main Process End")
     # 電源を落とす
     subprocess.call('poweroff') 
     
