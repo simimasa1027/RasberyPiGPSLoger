@@ -35,8 +35,10 @@ class GPSsettingLoader():
             "SerialPath"     : "/dev/ttyAMA0",          # シリアルポートパス
             "BaudeRate"      : 9600,                    # ボーレート
             "GPXOutputPath"  : "./",                    # GPXファイル出力パス
+            "GPXFileName"    : "{YMDHMS}.gpx",          # GPXファイル名
             "GetGpsStopTemperatureLimit"        : 75,   # GPS取得温度上限
-            "ForcedTerminationTemperatureLimit" : 90    # システム強制終了温度上限
+            "ForcedTerminationTemperatureLimit" : 90,    # システム強制終了温度上限
+            "PowerOffTimeOutSec" : 5                    # システム異常時電源落ち秒数
         }
 
     """
@@ -88,5 +90,6 @@ class GPSsettingLoader():
            name == "GPXOutputPath"     or
            name == "GetGpsStopTemperatureLimit" or
            name == "ForcedTerminationTemperatureLimit" or
-           name == "PowerOffTimeOutMin"):
+           name == "PowerOffTimeOutSec" or
+           name == "GPXFileName"):
             self.m_mapGPSConfig[name] = value.replace("\n","")

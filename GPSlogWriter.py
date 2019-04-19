@@ -13,9 +13,11 @@
 ==========================================================
 """
 
+import os.path
 import serial
 import threading
 import time
+import pytz
 from datetime import datetime
 import math
 
@@ -46,7 +48,7 @@ class GPSlogWriter():
         nBaudeRate = 9600                   # (i)ボーレート
     ):
         self.m_strSerialPath = strSerialPath
-        self.m_nBaudeRate = nBaudeRate
+        self.m_nBaudeRate = int(nBaudeRate)
         self.m_gpsSerial = serial.Serial(self.m_strSerialPath, self.m_nBaudeRate, timeout=10)
 
     """
@@ -54,6 +56,7 @@ class GPSlogWriter():
     * Function      : GPS取得開始関数
     * args[in]      : upsTempClass  電圧温度監視クラス変数
     * args[in]      : folderPath    GPX出力フォルダパス
+    * args[in]      : fileName      GPX出力ファイル名
     * args[in]      : getStopTemp   GPSデータ取得停止温度
     * Description   : -
     ==========================================================
@@ -62,10 +65,11 @@ class GPSlogWriter():
         self,
         upsTempClass,       # (i)電圧温度監視クラス変数
         folderPath = './',  # (i)GPX出力フォルダパス
+        fileName = '{YMDHMS}.gpx',  # (i)GPX出力ファイル名
         getStopTemp = 75    # (i)GPSデータ取得停止温度
     ):
         # gps取得をスレッドでやらせる
-        self.m_gpsThread = threading.Thread(target=self.getGPS,args=(upsTempClass,folderPath,getStopTemp,))
+        self.m_gpsThread = threading.Thread(target=self.getGPS,args=(upsTempClass,folderPath,fileName,getStopTemp,))
         self.m_gpsThread.start()
         
     """
@@ -73,6 +77,7 @@ class GPSlogWriter():
     * Function      : GPS取得関数
     * args[in]      : upsTempClass  電圧温度監視クラス変数
     * args[in]      : folderPath    GPX出力フォルダパス
+    * args[in]      : fileName      GPX出力ファイル名
     * args[in]      : getStopTemp   GPSデータ取得停止温度
     * Description   : -
     ==========================================================
@@ -81,19 +86,44 @@ class GPSlogWriter():
         self,
         upsTempClass,   # (i)電圧温度監視クラス変数
         folderPath,     # (i)GPX出力フォルダパス
+        fileName,       # (i)GPX出力ファイル名
         getStopTemp     # (i)GPSデータ取得停止温度
     ):
+        print("GPSLoger Start")
         self.m_gpsSerial.readline()	#1回目は捨てる
+        bGetDataFlag = False
+        while(bGetDataFlag == False):
+            strGetGPS = ""
+            try:
+                strGetGPS = self.m_gpsSerial.readline().decode('utf-8')
+            except UnicodeDecodeError as e:
+                print (e)
+                continue
+                
+            if strGetGPS[0:6] == '$GPRMC': # GPRMC形式でなければ捨てる
+                # GPSデータ配列の初期化
+                utcDate = strGetGPS.split(",")[9]   # UTC日時
+                utcTime = strGetGPS.split(",")[1]   # UTC時刻
+                bGetDataFlag = True
+
         aryNeedGPS = {}
-        
         # 現在日時(YYYYMMDDhhmmss)を取得
-        nowDate = datetime.now()
-        
-        with open(folderPath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='a') as writeGps:
-        
-            # GPXヘッダー文字列
-            writeGps.write(self.gpxHeaderWrite(nowDate.strftime("%Y/%m/%d %H:%M:%S"),"だめ"))
-            
+        nowDate = datetime(int("20" + utcDate[4:6]),int(utcDate[2:4]),int(utcDate[0:2]),int(utcTime[0:2]),int(utcTime[2:4]),int(utcTime[4:6]),0,tzinfo=pytz.timezone('Asia/Tokyo'))
+        formatFileName = dateFormatConverter(nowDate,fileName)
+
+        # ファイルが存在しない場合は新規作成
+        if os.path.isfile(folderPath + '/' + formatFileName) == False:
+            with open(folderPath + '/' + formatFileName, mode='w') as writeGps:
+                # GPXヘッダー文字列
+                writeGps.write(self.gpxHeaderWrite(nowDate.strftime("%Y/%m/%d %H:%M:%S"),nowDate.strftime("%Y/%m/%d %H:%M:%S")))
+        else :
+            fileRead = open(folderPath + '/' + formatFileName,"r")
+            fileLines = fileRead.readlines()
+            fileRead.close()
+            with open(folderPath + '/' + formatFileName, mode='w') as writeGps:
+                for i in range(len(fileLines) - 3):
+                    writeGps.write(fileLines[i])
+
         self.m_bIsStartFlag = True
         while(self.m_bIsStartFlag):
             # CPU温度がGPS取得温度上限を超えたら取得を中断する
@@ -118,12 +148,12 @@ class GPSlogWriter():
             
             # 必要なGPSデータを取得できたら
             if len(aryNeedGPS) == 2:
-                with open(folderPath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='a') as writeGps:    
+                with open(folderPath + '/' + formatFileName, mode='a') as writeGps:    
                     writeGps.write(self.gpsMainWrite(aryNeedGPS))
                 # GPSデータ配列の初期化
                 aryNeedGPS = {}
                 
-        with open(folderPath + '/' + nowDate.strftime("%Y%m%d%H%M%S") + '.gpx', mode='a') as writeGps:                       
+        with open(folderPath + '/' + formatFileName, mode='a') as writeGps:                       
             writeGps.write(self.gpxFooterWrite())
 
     """
@@ -255,3 +285,34 @@ class GPSlogWriter():
             "    </trk>\n" \
             "</gpx>"
         return strGPXFooter
+
+"""
+==========================================================
+* Function      : 日時→文字列変換
+* args[in]      : date      変換日時
+* args[in]      : formatStr 変換前文字列
+* Return        : 変換後文字列
+* Description   : -
+==========================================================
+"""
+def dateFormatConverter(
+    date,
+    formatStr
+):
+    dateFormat = ["{YMDHMS}","%Y%m%d%H%M%S"]
+    if r"{Y}" in formatStr:
+        dateFormat = ["{Y}","%Y"]
+    elif r"{YM}" in formatStr:
+        dateFormat = ["{YM}","%Y%m"]
+    elif r"{YMD}"in formatStr:
+        dateFormat = ["{YMD}","%Y%m%d"]
+    elif r"{YMDH}" in formatStr:
+        dateFormat = ["{YMDH}","%Y%m%d%H"]
+    elif r"{YMDHM}" in formatStr:
+        dateFormat = ["{YMDHM}","%Y%m%d%H%M"]
+    elif r"{YMDHMS}" in formatStr:
+        dateFormat = ["{YMDHMS}","%Y%m%d%H%M%S"]
+    else :
+        return date.strftime("%Y%m%d%H%M%S") + '.gpx'
+
+    return formatStr.replace(dateFormat[0],date.strftime(dateFormat[1]))
